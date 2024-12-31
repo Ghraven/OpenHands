@@ -135,7 +135,7 @@ def test_generate_dockerfile_build_from_scratch():
     )
     assert base_image in dockerfile_content
     assert 'apt-get update' in dockerfile_content
-    assert 'apt-get install -y wget curl sudo apt-utils' in dockerfile_content
+    assert 'wget curl sudo apt-utils git' in dockerfile_content
     assert 'poetry' in dockerfile_content and '-c conda-forge' in dockerfile_content
     assert 'python=3.12' in dockerfile_content
 
@@ -155,7 +155,7 @@ def test_generate_dockerfile_build_from_lock():
     )
 
     # These commands SHOULD NOT include in the dockerfile if build_from_scratch is False
-    assert 'RUN apt update && apt install -y wget sudo' not in dockerfile_content
+    assert 'wget curl sudo apt-utils git' not in dockerfile_content
     assert '-c conda-forge' not in dockerfile_content
     assert 'python=3.12' not in dockerfile_content
     assert 'https://micro.mamba.pm/install.sh' not in dockerfile_content
@@ -173,7 +173,7 @@ def test_generate_dockerfile_build_from_versioned():
     )
 
     # these commands should not exist when build from versioned
-    assert 'RUN apt update && apt install -y wget sudo' not in dockerfile_content
+    assert 'wget curl sudo apt-utils git' not in dockerfile_content
     assert '-c conda-forge' not in dockerfile_content
     assert 'python=3.12' not in dockerfile_content
     assert 'https://micro.mamba.pm/install.sh' not in dockerfile_content
@@ -239,6 +239,7 @@ def test_build_runtime_image_from_scratch():
                 f'{get_runtime_image_repo()}:{OH_VERSION}_mock-versioned-tag',
             ],
             platform=None,
+            extra_build_args=None,
         )
         assert (
             image_name
@@ -333,6 +334,7 @@ def test_build_runtime_image_exact_hash_not_exist_and_lock_exist():
                 # VERSION tag will NOT be included except from scratch
             ],
             platform=None,
+            extra_build_args=None,
         )
         mock_prep_build_folder.assert_called_once_with(
             ANY,
@@ -391,6 +393,7 @@ def test_build_runtime_image_exact_hash_not_exist_and_lock_not_exist_and_version
                 # VERSION tag will NOT be included except from scratch
             ],
             platform=None,
+            extra_build_args=None,
         )
         mock_prep_build_folder.assert_called_once_with(
             ANY,

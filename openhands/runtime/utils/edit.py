@@ -4,13 +4,17 @@ import re
 import tempfile
 from abc import ABC, abstractmethod
 
+from openhands_aci.utils.diff import get_diff
+
 from openhands.core.config import AppConfig
 from openhands.core.logger import openhands_logger as logger
 from openhands.events.action import (
     FileEditAction,
     FileReadAction,
     FileWriteAction,
+    IPythonRunCellAction,
 )
+from openhands.events.event import FileEditSource
 from openhands.events.observation import (
     ErrorObservation,
     FileEditObservation,
@@ -22,7 +26,6 @@ from openhands.linter import DefaultLinter
 from openhands.llm.llm import LLM
 from openhands.llm.metrics import Metrics
 from openhands.utils.chunk_localizer import Chunk, get_top_k_chunk_matches
-from openhands.utils.diff import get_diff
 
 SYS_MSG = """Your job is to produce a new version of the file based on the old version and the
 provided draft of the new version. The provided draft may be incomplete (it may skip lines) and/or incorrectly indented. You should try to apply the changes present in the draft to the old version, and output a new version of the file.
@@ -91,6 +94,10 @@ class FileEditRuntimeInterface(ABC):
     def write(self, action: FileWriteAction) -> Observation:
         pass
 
+    @abstractmethod
+    def run_ipython(self, action: IPythonRunCellAction) -> Observation:
+        pass
+
 
 class FileEditRuntimeMixin(FileEditRuntimeInterface):
     # Most LLMs have output token limit of 4k tokens.
@@ -153,11 +160,14 @@ class FileEditRuntimeMixin(FileEditRuntimeInterface):
     ) -> ErrorObservation | None:
         linter = DefaultLinter()
         # Copy the original file to a temporary file (with the same ext) and lint it
-        with tempfile.NamedTemporaryFile(
-            suffix=suffix, mode='w+', encoding='utf-8'
-        ) as original_file_copy, tempfile.NamedTemporaryFile(
-            suffix=suffix, mode='w+', encoding='utf-8'
-        ) as updated_file_copy:
+        with (
+            tempfile.NamedTemporaryFile(
+                suffix=suffix, mode='w+', encoding='utf-8'
+            ) as original_file_copy,
+            tempfile.NamedTemporaryFile(
+                suffix=suffix, mode='w+', encoding='utf-8'
+            ) as updated_file_copy,
+        ):
             # Lint the original file
             original_file_copy.write(old_content)
             original_file_copy.flush()
@@ -198,6 +208,15 @@ class FileEditRuntimeMixin(FileEditRuntimeInterface):
         return None
 
     def edit(self, action: FileEditAction) -> Observation:
+        if action.impl_source == FileEditSource.OH_ACI:
+            # Translate to ipython command to file_editor
+            return self.run_ipython(
+                IPythonRunCellAction(
+                    code=action.translated_ipython_code,
+                    include_extra=False,
+                )
+            )
+
         obs = self.read(FileReadAction(path=action.path))
         if (
             isinstance(obs, ErrorObservation)

@@ -1,153 +1,133 @@
-/**
- * Generates the headers for the GitHub API
- * @param token The GitHub token
- * @returns The headers for the GitHub API
- */
-const generateGitHubAPIHeaders = (token: string) =>
-  ({
-    Accept: "application/vnd.github+json",
-    Authorization: `Bearer ${token}`,
-    "X-GitHub-Api-Version": "2022-11-28",
-  }) as const;
+import { extractNextPageFromLink } from "#/utils/extract-next-page-from-link";
+import { github } from "./github-axios-instance";
+import { openHands } from "./open-hands-axios";
 
 /**
- * Checks if the data is a GitHub error response
- * @param data The data to check
- * @returns Boolean indicating if the data is a GitHub error response
+ * Given the user, retrieves app installations IDs for OpenHands Github App
+ * Uses user access token for Github App
  */
-export const isGitHubErrorReponse = <T extends object | Array<unknown>>(
-  data: T | GitHubErrorReponse | null,
-): data is GitHubErrorReponse =>
-  !!data && "message" in data && data.message !== undefined;
+export const retrieveGitHubAppInstallations = async (): Promise<number[]> => {
+  const response = await github.get<GithubAppInstallation>(
+    "/user/installations",
+  );
 
-/**
- * Given a GitHub token, retrieves the repositories of the authenticated user
- * @param token The GitHub token
- * @returns A list of repositories or an error response
- */
-export const retrieveGitHubUserRepositories = async (
-  token: string,
-  per_page = 30,
-  page = 1,
-): Promise<Response> => {
-  const url = new URL("https://api.github.com/user/repos");
-  url.searchParams.append("sort", "pushed"); // sort by most recently pushed
-  url.searchParams.append("per_page", per_page.toString());
-  url.searchParams.append("page", page.toString());
-
-  return fetch(url.toString(), {
-    headers: generateGitHubAPIHeaders(token),
-  });
+  return response.data.installations.map((installation) => installation.id);
 };
 
 /**
- * Given a GitHub token, retrieves all repositories of the authenticated user
- * @param token The GitHub token
- * @returns A list of repositories or an error response
+ * Retrieves repositories where OpenHands Github App has been installed
+ * @param installationIndex Pagination cursor position for app installation IDs
+ * @param installations Collection of all App installation IDs for OpenHands Github App
+ * @returns A list of repositories
  */
-export const retrieveAllGitHubUserRepositories = async (
-  token: string,
-): Promise<GitHubRepository[] | GitHubErrorReponse> => {
-  const repositories: GitHubRepository[] = [];
+export const retrieveGitHubAppRepositories = async (
+  installationIndex: number,
+  installations: number[],
+  page = 1,
+  per_page = 30,
+) => {
+  const installationId = installations[installationIndex];
+  const response = await openHands.get<GitHubAppRepository>(
+    "/api/github/repositories",
+    {
+      params: {
+        sort: "pushed",
+        page,
+        per_page,
+        installation_id: installationId,
+      },
+    },
+  );
 
-  // Fetch the first page to extract the last page number and get the first batch of data
-  const firstPageResponse = await retrieveGitHubUserRepositories(token, 100, 1);
+  const link = response.headers.link ?? "";
+  const nextPage = extractNextPageFromLink(link);
+  let nextInstallation: number | null;
 
-  if (!firstPageResponse.ok) {
-    return {
-      message: "Failed to fetch repositories",
-      documentation_url:
-        "https://docs.github.com/rest/reference/repos#list-repositories-for-the-authenticated-user",
-      status: firstPageResponse.status,
-    };
+  if (nextPage) {
+    nextInstallation = installationIndex;
+  } else if (installationIndex + 1 < installations.length) {
+    nextInstallation = installationIndex + 1;
+  } else {
+    nextInstallation = null;
   }
 
-  const firstPageData = await firstPageResponse.json();
-  repositories.push(...firstPageData);
+  return {
+    data: response.data.repositories,
+    nextPage,
+    installationIndex: nextInstallation,
+  };
+};
 
-  // Check for pagination and extract the last page number
-  const link = firstPageResponse.headers.get("link");
-  const lastPageMatch = link?.match(/page=(\d+)>; rel="last"/);
-  const lastPage = lastPageMatch ? parseInt(lastPageMatch[1], 10) : 1;
+/**
+ * Given a PAT, retrieves the repositories of the user
+ * @returns A list of repositories
+ */
+export const retrieveGitHubUserRepositories = async (
+  page = 1,
+  per_page = 30,
+) => {
+  const response = await openHands.get<GitHubRepository[]>(
+    "/api/github/repositories",
+    {
+      params: {
+        sort: "pushed",
+        page,
+        per_page,
+      },
+    },
+  );
 
-  // If there is only one page, return the fetched repositories
-  if (lastPage === 1) {
-    return repositories;
-  }
+  const link = response.headers.link ?? "";
+  const nextPage = extractNextPageFromLink(link);
 
-  // Create an array of promises for the remaining pages
-  const promises = [];
-  for (let page = 2; page <= lastPage; page += 1) {
-    promises.push(retrieveGitHubUserRepositories(token, 100, page));
-  }
-
-  // Fetch all pages in parallel
-  const responses = await Promise.all(promises);
-
-  for (const response of responses) {
-    if (response.ok) {
-      // TODO: Is there a way to avoid using await within a loop?
-      // eslint-disable-next-line no-await-in-loop
-      const data = await response.json();
-      repositories.push(...data);
-    } else {
-      return {
-        message: "Failed to fetch repositories",
-        documentation_url:
-          "https://docs.github.com/rest/reference/repos#list-repositories-for-the-authenticated-user",
-        status: response.status,
-      };
-    }
-  }
-
-  return repositories;
+  return { data: response.data, nextPage };
 };
 
 /**
  * Given a GitHub token, retrieves the authenticated user
- * @param token The GitHub token
  * @returns The authenticated user or an error response
  */
-export const retrieveGitHubUser = async (
-  token: string,
-): Promise<GitHubUser | GitHubErrorReponse> => {
-  const response = await fetch("https://api.github.com/user", {
-    headers: generateGitHubAPIHeaders(token),
-  });
-  const data = await response.json();
+export const retrieveGitHubUser = async () => {
+  const response = await github.get<GitHubUser>("/user");
 
-  if (!isGitHubErrorReponse(data)) {
-    // Only return the necessary user data
-    const user: GitHubUser = {
-      id: data.id,
-      login: data.login,
-      avatar_url: data.avatar_url,
-      company: data.company,
-      name: data.name,
-      email: data.email,
-    };
+  const { data } = response;
 
-    return user;
-  }
-
-  const error: GitHubErrorReponse = {
-    message: data.message,
-    documentation_url: data.documentation_url,
-    status: response.status,
+  const user: GitHubUser = {
+    id: data.id,
+    login: data.login,
+    avatar_url: data.avatar_url,
+    company: data.company,
+    name: data.name,
+    email: data.email,
   };
 
-  return error;
+  return user;
 };
 
 export const retrieveLatestGitHubCommit = async (
-  token: string,
   repository: string,
-): Promise<GitHubCommit[] | GitHubErrorReponse> => {
-  const url = new URL(`https://api.github.com/repos/${repository}/commits`);
-  url.searchParams.append("per_page", "1");
-  const response = await fetch(url.toString(), {
-    headers: generateGitHubAPIHeaders(token),
-  });
-
-  return response.json();
+): Promise<GitHubCommit | null> => {
+  try {
+    const response = await github.get<GitHubCommit[]>(
+      `/repos/${repository}/commits`,
+      {
+        params: {
+          per_page: 1,
+        },
+      },
+    );
+    return response.data[0] || null;
+  } catch (error) {
+    if (!error || typeof error !== "object") {
+      throw new Error("Unknown error occurred");
+    }
+    const axiosError = error as { response?: { status: number } };
+    if (axiosError.response?.status === 409) {
+      // Repository is empty, no commits yet
+      return null;
+    }
+    throw new Error(
+      error instanceof Error ? error.message : "Unknown error occurred",
+    );
+  }
 };

@@ -2,6 +2,8 @@ import atexit
 import copy
 import json
 import os
+import random
+import string
 from abc import abstractmethod
 from pathlib import Path
 from typing import Callable
@@ -9,6 +11,7 @@ from typing import Callable
 from requests.exceptions import ConnectionError
 
 from openhands.core.config import AppConfig, SandboxConfig
+from openhands.core.exceptions import AgentRuntimeDisconnectedError
 from openhands.core.logger import openhands_logger as logger
 from openhands.events import EventSource, EventStream, EventStreamSubscriber
 from openhands.events.action import (
@@ -30,7 +33,11 @@ from openhands.events.observation import (
     UserRejectObservation,
 )
 from openhands.events.serialization.action import ACTION_TYPE_TO_CLASS
-from openhands.runtime.plugins import JupyterRequirement, PluginRequirement
+from openhands.runtime.plugins import (
+    JupyterRequirement,
+    PluginRequirement,
+    VSCodeRequirement,
+)
 from openhands.runtime.utils.edit import FileEditRuntimeMixin
 from openhands.utils.async_utils import call_sync_from_async
 
@@ -41,14 +48,6 @@ STATUS_MESSAGES = {
     'STATUS$CONTAINER_STARTED': 'Container started.',
     'STATUS$WAITING_FOR_CLIENT': 'Waiting for client...',
 }
-
-
-class RuntimeNotReadyError(Exception):
-    pass
-
-
-class RuntimeDisconnectedError(Exception):
-    pass
 
 
 def _default_env_vars(sandbox_config: SandboxConfig) -> dict[str, str]:
@@ -84,13 +83,20 @@ class Runtime(FileEditRuntimeMixin):
         env_vars: dict[str, str] | None = None,
         status_callback: Callable | None = None,
         attach_to_existing: bool = False,
+        headless_mode: bool = False,
     ):
         self.sid = sid
         self.event_stream = event_stream
         self.event_stream.subscribe(
             EventStreamSubscriber.RUNTIME, self.on_event, self.sid
         )
-        self.plugins = plugins if plugins is not None and len(plugins) > 0 else []
+        self.plugins = (
+            copy.deepcopy(plugins) if plugins is not None and len(plugins) > 0 else []
+        )
+        # add VSCode plugin if not in headless mode
+        if not headless_mode:
+            self.plugins.append(VSCodeRequirement())
+
         self.status_callback = status_callback
         self.attach_to_existing = attach_to_existing
 
@@ -100,6 +106,10 @@ class Runtime(FileEditRuntimeMixin):
         self.initial_env_vars = _default_env_vars(config.sandbox)
         if env_vars is not None:
             self.initial_env_vars.update(env_vars)
+
+        self._vscode_enabled = any(
+            isinstance(plugin, VSCodeRequirement) for plugin in self.plugins
+        )
 
         # Load mixins
         FileEditRuntimeMixin.__init__(self)
@@ -170,10 +180,14 @@ class Runtime(FileEditRuntimeMixin):
             except Exception as e:
                 err_id = ''
                 if isinstance(e, ConnectionError) or isinstance(
-                    e, RuntimeDisconnectedError
+                    e, AgentRuntimeDisconnectedError
                 ):
                     err_id = 'STATUS$ERROR_RUNTIME_DISCONNECTED'
-                self.log('error', f'Unexpected error while running action {e}')
+                logger.error(
+                    'Unexpected error while running action',
+                    exc_info=True,
+                    stack_info=True,
+                )
                 self.log('error', f'Problematic action: {str(event)}')
                 self.send_error_message(err_id, str(e))
                 self.close()
@@ -185,6 +199,51 @@ class Runtime(FileEditRuntimeMixin):
             # this might be unnecessary, since source should be set by the event stream when we're here
             source = event.source if event.source else EventSource.AGENT
             self.event_stream.add_event(observation, source)  # type: ignore[arg-type]
+
+    def clone_repo(self, github_token: str | None, selected_repository: str | None):
+        if not github_token or not selected_repository:
+            return
+        url = f'https://{github_token}@github.com/{selected_repository}.git'
+        dir_name = selected_repository.split('/')[1]
+        # add random branch name to avoid conflicts
+        random_str = ''.join(
+            random.choices(string.ascii_lowercase + string.digits, k=8)
+        )
+        branch_name = f'openhands-workspace-{random_str}'
+        action = CmdRunAction(
+            command=f'git clone {url} {dir_name} ; cd {dir_name} ; git checkout -b {branch_name}',
+        )
+        self.log('info', f'Cloning repo: {selected_repository}')
+        self.run_action(action)
+
+    def get_custom_microagents(self, selected_repository: str | None) -> list[str]:
+        custom_microagents_content = []
+        custom_microagents_dir = Path('.openhands') / 'microagents'
+
+        dir_name = str(custom_microagents_dir)
+        if selected_repository:
+            dir_name = str(
+                Path(selected_repository.split('/')[1]) / custom_microagents_dir
+            )
+        obs = self.read(FileReadAction(path='.openhands_instructions'))
+        if isinstance(obs, ErrorObservation):
+            self.log('debug', 'openhands_instructions not present')
+        else:
+            openhands_instructions = obs.content
+            self.log('info', f'openhands_instructions: {openhands_instructions}')
+            custom_microagents_content.append(openhands_instructions)
+
+        files = self.list_files(dir_name)
+
+        self.log('info', f'Found {len(files)} custom microagents.')
+
+        for fname in files:
+            content = self.read(
+                FileReadAction(path=str(custom_microagents_dir / fname))
+            ).content
+            custom_microagents_content.append(content)
+
+        return custom_microagents_content
 
     def run_action(self, action: Action) -> Observation:
         """Run an action and return the resulting observation.
@@ -277,4 +336,16 @@ class Runtime(FileEditRuntimeMixin):
     @abstractmethod
     def copy_from(self, path: str) -> Path:
         """Zip all files in the sandbox and return a path in the local filesystem."""
+        raise NotImplementedError('This method is not implemented in the base class.')
+
+    # ====================================================================
+    # VSCode
+    # ====================================================================
+
+    @property
+    def vscode_enabled(self) -> bool:
+        return self._vscode_enabled
+
+    @property
+    def vscode_url(self) -> str | None:
         raise NotImplementedError('This method is not implemented in the base class.')

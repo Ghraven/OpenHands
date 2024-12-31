@@ -6,7 +6,7 @@ import pytest
 
 from openhands.controller.agent import Agent
 from openhands.controller.agent_controller import AgentController
-from openhands.controller.state.state import TrafficControlState
+from openhands.controller.state.state import State, TrafficControlState
 from openhands.core.config import AppConfig
 from openhands.core.main import run_controller
 from openhands.core.schema import AgentState
@@ -20,6 +20,7 @@ from openhands.llm import LLM
 from openhands.llm.metrics import Metrics
 from openhands.runtime.base import Runtime
 from openhands.storage import get_file_store
+from openhands.storage.memory import InMemoryFileStore
 
 
 @pytest.fixture
@@ -41,7 +42,9 @@ def mock_agent():
 
 @pytest.fixture
 def mock_event_stream():
-    return MagicMock(spec=EventStream)
+    mock = MagicMock(spec=EventStream)
+    mock.get_latest_event_id.return_value = 0
+    return mock
 
 
 @pytest.fixture
@@ -159,14 +162,14 @@ async def test_run_controller_with_fatal_error(mock_agent, mock_event_stream):
     print(f'event_stream: {list(event_stream.get_events())}')
     assert state.iteration == 4
     assert state.agent_state == AgentState.ERROR
-    assert state.last_error == 'Agent got stuck in a loop'
+    assert state.last_error == 'AgentStuckInLoopError: Agent got stuck in a loop'
     assert len(list(event_stream.get_events())) == 11
 
 
 @pytest.mark.asyncio
 async def test_run_controller_stop_with_stuck():
     config = AppConfig()
-    file_store = get_file_store(config.file_store, config.file_store_path)
+    file_store = InMemoryFileStore({})
     event_stream = EventStream(sid='test', file_store=file_store)
 
     agent = MagicMock(spec=Agent)
@@ -225,7 +228,7 @@ async def test_run_controller_stop_with_stuck():
     assert last_event['observation'] == 'agent_state_changed'
 
     assert state.agent_state == AgentState.ERROR
-    assert state.last_error == 'Agent got stuck in a loop'
+    assert state.last_error == 'AgentStuckInLoopError: Agent got stuck in a loop'
 
 
 @pytest.mark.asyncio
@@ -278,7 +281,9 @@ async def test_delegate_step_different_states(
 
 
 @pytest.mark.asyncio
-async def test_step_max_iterations(mock_agent, mock_event_stream):
+async def test_max_iterations_extension(mock_agent, mock_event_stream):
+    # Test with headless_mode=False - should extend max_iterations
+    initial_state = State(max_iterations=10)
     controller = AgentController(
         agent=mock_agent,
         event_stream=mock_event_stream,
@@ -286,18 +291,34 @@ async def test_step_max_iterations(mock_agent, mock_event_stream):
         sid='test',
         confirmation_mode=False,
         headless_mode=False,
+        initial_state=initial_state,
     )
     controller.state.agent_state = AgentState.RUNNING
     controller.state.iteration = 10
     assert controller.state.traffic_control_state == TrafficControlState.NORMAL
+
+    # Trigger throttling by calling _step() when we hit max_iterations
     await controller._step()
     assert controller.state.traffic_control_state == TrafficControlState.THROTTLING
     assert controller.state.agent_state == AgentState.ERROR
+
+    # Simulate a new user message
+    message_action = MessageAction(content='Test message')
+    message_action._source = EventSource.USER
+    await controller.on_event(message_action)
+
+    # Max iterations should be extended to current iteration + initial max_iterations
+    assert (
+        controller.state.max_iterations == 20
+    )  # Current iteration (10 initial because _step() should not have been executed) + initial max_iterations (10)
+    assert controller.state.traffic_control_state == TrafficControlState.NORMAL
+    assert controller.state.agent_state == AgentState.RUNNING
+
+    # Close the controller to clean up
     await controller.close()
 
-
-@pytest.mark.asyncio
-async def test_step_max_iterations_headless(mock_agent, mock_event_stream):
+    # Test with headless_mode=True - should NOT extend max_iterations
+    initial_state = State(max_iterations=10)
     controller = AgentController(
         agent=mock_agent,
         event_stream=mock_event_stream,
@@ -305,13 +326,24 @@ async def test_step_max_iterations_headless(mock_agent, mock_event_stream):
         sid='test',
         confirmation_mode=False,
         headless_mode=True,
+        initial_state=initial_state,
     )
     controller.state.agent_state = AgentState.RUNNING
     controller.state.iteration = 10
     assert controller.state.traffic_control_state == TrafficControlState.NORMAL
+
+    # Simulate a new user message
+    message_action = MessageAction(content='Test message')
+    message_action._source = EventSource.USER
+    await controller.on_event(message_action)
+
+    # Max iterations should NOT be extended in headless mode
+    assert controller.state.max_iterations == 10  # Original value unchanged
+
+    # Trigger throttling by calling _step() when we hit max_iterations
     await controller._step()
+
     assert controller.state.traffic_control_state == TrafficControlState.THROTTLING
-    # In headless mode, throttling results in an error
     assert controller.state.agent_state == AgentState.ERROR
     await controller.close()
 
@@ -354,4 +386,153 @@ async def test_step_max_budget_headless(mock_agent, mock_event_stream):
     assert controller.state.traffic_control_state == TrafficControlState.THROTTLING
     # In headless mode, throttling results in an error
     assert controller.state.agent_state == AgentState.ERROR
+    await controller.close()
+
+
+@pytest.mark.asyncio
+async def test_reset_with_pending_action_no_observation(mock_agent, mock_event_stream):
+    """Test reset() when there's a pending action with tool call metadata but no observation."""
+    controller = AgentController(
+        agent=mock_agent,
+        event_stream=mock_event_stream,
+        max_iterations=10,
+        sid='test',
+        confirmation_mode=False,
+        headless_mode=True,
+    )
+
+    # Create a pending action with tool call metadata
+    pending_action = CmdRunAction(command='test')
+    pending_action.tool_call_metadata = {
+        'function': 'test_function',
+        'args': {'arg1': 'value1'},
+    }
+    controller._pending_action = pending_action
+
+    # Call reset
+    controller._reset()
+
+    # Verify that an ErrorObservation was added to the event stream
+    mock_event_stream.add_event.assert_called_once()
+    args, kwargs = mock_event_stream.add_event.call_args
+    error_obs, source = args
+    assert isinstance(error_obs, ErrorObservation)
+    assert error_obs.content == 'The action has not been executed.'
+    assert error_obs.tool_call_metadata == pending_action.tool_call_metadata
+    assert error_obs._cause == pending_action.id
+    assert source == EventSource.AGENT
+
+    # Verify that pending action was reset
+    assert controller._pending_action is None
+
+    # Verify that agent.reset() was called
+    mock_agent.reset.assert_called_once()
+    await controller.close()
+
+
+@pytest.mark.asyncio
+async def test_reset_with_pending_action_existing_observation(
+    mock_agent, mock_event_stream
+):
+    """Test reset() when there's a pending action with tool call metadata and an existing observation."""
+    controller = AgentController(
+        agent=mock_agent,
+        event_stream=mock_event_stream,
+        max_iterations=10,
+        sid='test',
+        confirmation_mode=False,
+        headless_mode=True,
+    )
+
+    # Create a pending action with tool call metadata
+    pending_action = CmdRunAction(command='test')
+    pending_action.tool_call_metadata = {
+        'function': 'test_function',
+        'args': {'arg1': 'value1'},
+    }
+    controller._pending_action = pending_action
+
+    # Add an existing observation to the history
+    existing_obs = ErrorObservation(content='Previous error')
+    existing_obs.tool_call_metadata = pending_action.tool_call_metadata
+    controller.state.history.append(existing_obs)
+
+    # Call reset
+    controller._reset()
+
+    # Verify that no new ErrorObservation was added to the event stream
+    mock_event_stream.add_event.assert_not_called()
+
+    # Verify that pending action was reset
+    assert controller._pending_action is None
+
+    # Verify that agent.reset() was called
+    mock_agent.reset.assert_called_once()
+    await controller.close()
+
+
+@pytest.mark.asyncio
+async def test_reset_without_pending_action(mock_agent, mock_event_stream):
+    """Test reset() when there's no pending action."""
+    controller = AgentController(
+        agent=mock_agent,
+        event_stream=mock_event_stream,
+        max_iterations=10,
+        sid='test',
+        confirmation_mode=False,
+        headless_mode=True,
+    )
+
+    # Call reset
+    controller._reset()
+
+    # Verify that no ErrorObservation was added to the event stream
+    mock_event_stream.add_event.assert_not_called()
+
+    # Verify that pending action is None
+    assert controller._pending_action is None
+
+    # Verify that agent.reset() was called
+    mock_agent.reset.assert_called_once()
+    await controller.close()
+
+
+@pytest.mark.asyncio
+async def test_reset_with_pending_action_no_metadata(
+    mock_agent, mock_event_stream, monkeypatch
+):
+    """Test reset() when there's a pending action without tool call metadata."""
+    controller = AgentController(
+        agent=mock_agent,
+        event_stream=mock_event_stream,
+        max_iterations=10,
+        sid='test',
+        confirmation_mode=False,
+        headless_mode=True,
+    )
+
+    # Create a pending action without tool call metadata
+    pending_action = CmdRunAction(command='test')
+    # Mock hasattr to return False for tool_call_metadata
+    original_hasattr = hasattr
+
+    def mock_hasattr(obj, name):
+        if obj == pending_action and name == 'tool_call_metadata':
+            return False
+        return original_hasattr(obj, name)
+
+    monkeypatch.setattr('builtins.hasattr', mock_hasattr)
+    controller._pending_action = pending_action
+
+    # Call reset
+    controller._reset()
+
+    # Verify that no ErrorObservation was added to the event stream
+    mock_event_stream.add_event.assert_not_called()
+
+    # Verify that pending action was reset
+    assert controller._pending_action is None
+
+    # Verify that agent.reset() was called
+    mock_agent.reset.assert_called_once()
     await controller.close()
