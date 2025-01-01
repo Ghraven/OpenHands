@@ -2,13 +2,14 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "test-utils";
-import { ChatInterface } from "#/components/chat-interface";
-import { addUserMessage } from "#/state/chatSlice";
+import { addUserMessage } from "#/state/chat-slice";
 import { SUGGESTIONS } from "#/utils/suggestions";
-import * as ChatSlice from "#/state/chatSlice";
+import * as ChatSlice from "#/state/chat-slice";
+import { WsClientProviderStatus } from "#/context/ws-client-provider";
+import { ChatInterface } from "#/components/features/chat/chat-interface";
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const renderChatInterface = (messages: (Message | ErrorMessage)[]) =>
+const renderChatInterface = (messages: Message[]) =>
   renderWithProviders(<ChatInterface />);
 
 describe("Empty state", () => {
@@ -16,14 +17,23 @@ describe("Empty state", () => {
     send: vi.fn(),
   }));
 
-  const { useSocket: useSocketMock } = vi.hoisted(() => ({
-    useSocket: vi.fn(() => ({ send: sendMock, runtimeActive: true })),
+  const { useWsClient: useWsClientMock } = vi.hoisted(() => ({
+    useWsClient: vi.fn(() => ({
+      send: sendMock,
+      status: WsClientProviderStatus.CONNECTED,
+      isLoadingMessages: false,
+    })),
   }));
 
   beforeAll(() => {
+    vi.mock("react-router", async (importActual) => ({
+      ...(await importActual<typeof import("react-router")>()),
+      useRouteLoaderData: vi.fn(() => ({})),
+    }));
+
     vi.mock("#/context/socket", async (importActual) => ({
-      ...(await importActual<typeof import("#/context/socket")>()),
-      useSocket: useSocketMock,
+      ...(await importActual<typeof import("#/context/ws-client-provider")>()),
+      useWsClient: useWsClientMock,
     }));
   });
 
@@ -46,6 +56,7 @@ describe("Empty state", () => {
           content: "Hello",
           imageUrls: [],
           timestamp: new Date().toISOString(),
+          pending: true,
         }),
       );
     });
@@ -77,9 +88,10 @@ describe("Empty state", () => {
     "should load the a user message to the input when selecting",
     async () => {
       // this is to test that the message is in the UI before the socket is called
-      useSocketMock.mockImplementation(() => ({
+      useWsClientMock.mockImplementation(() => ({
         send: sendMock,
-        runtimeActive: false, // mock an inactive runtime setup
+        status: WsClientProviderStatus.CONNECTED,
+        isLoadingMessages: false,
       }));
       const addUserMessageSpy = vi.spyOn(ChatSlice, "addUserMessage");
       const user = userEvent.setup();
@@ -106,9 +118,10 @@ describe("Empty state", () => {
   it.fails(
     "should send the message to the socket only if the runtime is active",
     async () => {
-      useSocketMock.mockImplementation(() => ({
+      useWsClientMock.mockImplementation(() => ({
         send: sendMock,
-        runtimeActive: false, // mock an inactive runtime setup
+        status: WsClientProviderStatus.CONNECTED,
+        isLoadingMessages: false,
       }));
       const user = userEvent.setup();
       const { rerender } = renderWithProviders(<ChatInterface />, {
@@ -123,9 +136,10 @@ describe("Empty state", () => {
       await user.click(displayedSuggestions[0]);
       expect(sendMock).not.toHaveBeenCalled();
 
-      useSocketMock.mockImplementation(() => ({
+      useWsClientMock.mockImplementation(() => ({
         send: sendMock,
-        runtimeActive: true, // mock an active runtime setup
+        status: WsClientProviderStatus.CONNECTED,
+        isLoadingMessages: false,
       }));
       rerender(<ChatInterface />);
 
@@ -159,12 +173,14 @@ describe.skip("ChatInterface", () => {
         content: "Hello",
         imageUrls: [],
         timestamp: new Date().toISOString(),
+        pending: true,
       },
       {
         sender: "assistant",
         content: "Hi",
         imageUrls: [],
         timestamp: new Date().toISOString(),
+        pending: true,
       },
     ];
     renderChatInterface(messages);
@@ -179,7 +195,7 @@ describe.skip("ChatInterface", () => {
     expect(screen.getByTestId("chat-input")).toBeInTheDocument();
   });
 
-  it.todo("should call socket send when submitting a message", async () => {
+  it("should call socket send when submitting a message", async () => {
     const user = userEvent.setup();
     const messages: Message[] = [];
     renderChatInterface(messages);
@@ -198,6 +214,7 @@ describe.skip("ChatInterface", () => {
         content: "Here are some images",
         imageUrls: [],
         timestamp: new Date().toISOString(),
+        pending: true,
       },
     ];
     const { rerender } = renderChatInterface(messages);
@@ -210,6 +227,7 @@ describe.skip("ChatInterface", () => {
         content: "Here are some images",
         imageUrls: ["image1", "image2"],
         timestamp: new Date().toISOString(),
+        pending: true,
       },
     ];
 
@@ -222,8 +240,6 @@ describe.skip("ChatInterface", () => {
     );
   });
 
-  it.todo("should render confirmation buttons");
-
   it("should render a 'continue' action when there are more than 2 messages and awaiting user input", () => {
     const messages: Message[] = [
       {
@@ -231,12 +247,14 @@ describe.skip("ChatInterface", () => {
         content: "Hello",
         imageUrls: [],
         timestamp: new Date().toISOString(),
+        pending: true,
       },
       {
         sender: "user",
         content: "Hi",
         imageUrls: [],
         timestamp: new Date().toISOString(),
+        pending: true,
       },
     ];
     const { rerender } = renderChatInterface(messages);
@@ -249,6 +267,7 @@ describe.skip("ChatInterface", () => {
       content: "How can I help you?",
       imageUrls: [],
       timestamp: new Date().toISOString(),
+      pending: true,
     });
 
     rerender(<ChatInterface />);
@@ -257,23 +276,89 @@ describe.skip("ChatInterface", () => {
   });
 
   it("should render inline errors", () => {
-    const messages: (Message | ErrorMessage)[] = [
+    const messages: Message[] = [
       {
         sender: "assistant",
         content: "Hello",
         imageUrls: [],
         timestamp: new Date().toISOString(),
+        pending: true,
       },
       {
-        error: true,
-        id: "",
-        message: "Something went wrong",
+        type: "error",
+        content: "Something went wrong",
+        sender: "assistant",
+        timestamp: new Date().toISOString(),
       },
     ];
     renderChatInterface(messages);
 
     const error = screen.getByTestId("error-message");
     expect(within(error).getByText("Something went wrong")).toBeInTheDocument();
+  });
+
+  it("should render both GitHub buttons initially when ghToken is available", () => {
+    vi.mock("react-router", async (importActual) => ({
+      ...(await importActual<typeof import("react-router")>()),
+      useRouteLoaderData: vi.fn(() => ({ ghToken: "test-token" })),
+    }));
+
+    const messages: Message[] = [
+      {
+        sender: "assistant",
+        content: "Hello",
+        imageUrls: [],
+        timestamp: new Date().toISOString(),
+        pending: true,
+      },
+    ];
+    renderChatInterface(messages);
+
+    const pushButton = screen.getByRole("button", { name: "Push to Branch" });
+    const prButton = screen.getByRole("button", { name: "Push & Create PR" });
+
+    expect(pushButton).toBeInTheDocument();
+    expect(prButton).toBeInTheDocument();
+    expect(pushButton).toHaveTextContent("Push to Branch");
+    expect(prButton).toHaveTextContent("Push & Create PR");
+  });
+
+  it("should render only 'Push changes to PR' button after PR is created", async () => {
+    vi.mock("react-router", async (importActual) => ({
+      ...(await importActual<typeof import("react-router")>()),
+      useRouteLoaderData: vi.fn(() => ({ ghToken: "test-token" })),
+    }));
+
+    const messages: Message[] = [
+      {
+        sender: "assistant",
+        content: "Hello",
+        imageUrls: [],
+        timestamp: new Date().toISOString(),
+        pending: true,
+      },
+    ];
+    const { rerender } = renderChatInterface(messages);
+    const user = userEvent.setup();
+
+    // Click the "Push & Create PR" button
+    const prButton = screen.getByRole("button", { name: "Push & Create PR" });
+    await user.click(prButton);
+
+    // Re-render to trigger state update
+    rerender(<ChatInterface />);
+
+    // Verify only one button is shown
+    const pushToPrButton = screen.getByRole("button", {
+      name: "Push changes to PR",
+    });
+    expect(pushToPrButton).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Push to Branch" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Push & Create PR" }),
+    ).not.toBeInTheDocument();
   });
 
   it("should render feedback actions if there are more than 3 messages", () => {
@@ -283,18 +368,21 @@ describe.skip("ChatInterface", () => {
         content: "Hello",
         imageUrls: [],
         timestamp: new Date().toISOString(),
+        pending: true,
       },
       {
         sender: "user",
         content: "Hi",
         imageUrls: [],
         timestamp: new Date().toISOString(),
+        pending: true,
       },
       {
         sender: "assistant",
         content: "How can I help you?",
         imageUrls: [],
         timestamp: new Date().toISOString(),
+        pending: true,
       },
     ];
     const { rerender } = renderChatInterface(messages);
@@ -305,18 +393,11 @@ describe.skip("ChatInterface", () => {
       content: "I need help",
       imageUrls: [],
       timestamp: new Date().toISOString(),
+      pending: true,
     });
 
     rerender(<ChatInterface />);
 
     expect(screen.getByTestId("feedback-actions")).toBeInTheDocument();
-  });
-
-  describe("feedback", () => {
-    it.todo("should open the feedback modal when a feedback action is clicked");
-    it.todo(
-      "should submit feedback and hide the actions when feedback is shared",
-    );
-    it.todo("should render the actions once more after new messages are added");
   });
 });

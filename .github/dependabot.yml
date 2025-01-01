@@ -16,6 +16,9 @@ updates:
       chromadb:
         patterns:
           - "chromadb"
+      browsergym:
+        patterns:
+          - "browsergym*"
       security-all:
         applies-to: "security-updates"
         patterns:
@@ -67,3 +70,8 @@ updates:
         applies-to: "version-updates"
         patterns:
           - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

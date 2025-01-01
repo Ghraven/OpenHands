@@ -58,7 +58,7 @@ poetry run python ./openhands/core/main.py \
 
 ## OpenHands 如何工作
 
-OpenHands 的主要入口点在 `openhands/core/main.py` 中。以下是它工作原理的简化流程：
+OpenHands 的主要入口点在 `openhands/core/main.py` 中。以下是它的简化工作流程：
 
 1. 解析命令行参数并加载配置
 2. 使用 `create_runtime()` 创建运行时环境
@@ -73,7 +73,7 @@ OpenHands 的主要入口点在 `openhands/core/main.py` 中。以下是它工�
 
 ## 入门最简单的方法：探索现有基准
 
-我们鼓励您查看我们仓库的 [`evaluation/` 目录](https://github.com/All-Hands-AI/OpenHands/blob/main/evaluation)中提供的各种评估基准。
+我们鼓励您查看我们仓库的 [`evaluation/benchmarks/` 目录](https://github.com/All-Hands-AI/OpenHands/blob/main/evaluation/benchmarks)中提供的各种评估基准。
 
 要集成您自己的基准，我们建议从最接近您需求的基准开始。这种方法可以显著简化您的集成过程，允许您在现有结构的基础上进行构建并使其适应您的特定要求。
 
@@ -261,7 +261,7 @@ def codeact_user_response(state: State | None) -> str:
             if isinstance(event, MessageAction) and event.source == 'user'
         ]
         if len(user_msgs) >= 2:
-            # 让代理知道它在尝试 3 次后可以放弃
+            # 当代理已尝试 3 次时，让它知道可以放弃
             return (
                 msg
                 + 'If you want to give up, run: <execute_bash> exit </execute_bash>.\n'

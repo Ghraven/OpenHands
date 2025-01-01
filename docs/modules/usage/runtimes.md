@@ -16,7 +16,7 @@ some flags being passed to `docker run` that make this possible:
 
 ```
 docker run # ...
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/all-hands-ai/runtime:0.11-nikolaik \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/all-hands-ai/runtime:0.17-nikolaik \
     -v /var/run/docker.sock:/var/run/docker.sock \
     # ...
 ```
@@ -28,12 +28,22 @@ You can also [build your own runtime image](how-to/custom-sandbox-guide).
 ### Connecting to Your filesystem
 One useful feature here is the ability to connect to your local filesystem.
 
-To mount your filesystem into the runtime, add the following options to
-the `docker run` command:
-
+To mount your filesystem into the runtime, first set WORKSPACE_BASE:
 ```bash
 export WORKSPACE_BASE=/path/to/your/code
 
+# Linux and Mac Example
+# export WORKSPACE_BASE=$HOME/OpenHands
+# Will set $WORKSPACE_BASE to /home/<username>/OpenHands
+#
+# WSL on Windows Example
+# export WORKSPACE_BASE=/mnt/c/dev/OpenHands
+# Will set $WORKSPACE_BASE to C:\dev\OpenHands
+```
+
+then add the following options to the `docker run` command:
+
+```bash
 docker run # ...
     -e SANDBOX_USER_ID=$(id -u) \
     -e WORKSPACE_MOUNT_PATH=$WORKSPACE_BASE \
@@ -49,7 +59,7 @@ but seems to work well on most systems.
 
 ## All Hands Runtime
 The All Hands Runtime is currently in beta. You can request access by joining
-the #remote-runtime-limited-beta channel on Slack (see the README for an invite).
+the #remote-runtime-limited-beta channel on Slack ([see the README](https://github.com/All-Hands-AI/OpenHands?tab=readme-ov-file#-join-our-community) for an invite).
 
 To use the All Hands Runtime, set the following environment variables when
 starting OpenHands:
@@ -59,14 +69,14 @@ docker run # ...
     -e RUNTIME=remote \
     -e SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.app.all-hands.dev" \
     -e SANDBOX_API_KEY="your-all-hands-api-key" \
-    -e SANDBOX_KEEP_REMOTE_RUNTIME_ALIVE="true" \
+    -e SANDBOX_KEEP_RUNTIME_ALIVE="true" \
     # ...
 ```
 
 ## Modal Runtime
 Our partners at [Modal](https://modal.com/) have also provided a runtime for OpenHands.
 
-To use the Modal Runtime, create an account, and then [create an API key](https://modal.com/settings)
+To use the Modal Runtime, create an account, and then [create an API key.](https://modal.com/settings)
 
 You'll then need to set the following environment variables when starting OpenHands:
 ```bash

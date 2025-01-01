@@ -428,6 +428,7 @@ def test_api_keys_repr_str():
         'aws_secret_access_key',
         'input_cost_per_token',
         'output_cost_per_token',
+        'custom_tokenizer',
     ]
     for attr_name in dir(LLMConfig):
         if (
@@ -461,6 +462,7 @@ def test_api_keys_repr_str():
         jwt_secret='my_jwt_secret',
         modal_api_token_id='my_modal_api_token_id',
         modal_api_token_secret='my_modal_api_token_secret',
+        runloop_api_key='my_runloop_api_key',
     )
     assert "e2b_api_key='******'" in repr(app_config)
     assert "e2b_api_key='******'" in str(app_config)
@@ -470,6 +472,8 @@ def test_api_keys_repr_str():
     assert "modal_api_token_id='******'" in str(app_config)
     assert "modal_api_token_secret='******'" in repr(app_config)
     assert "modal_api_token_secret='******'" in str(app_config)
+    assert "runloop_api_key='******'" in repr(app_config)
+    assert "runloop_api_key='******'" in str(app_config)
 
     # Check that no other attrs in AppConfig have 'key' or 'token' in their name
     # This will fail when new attrs are added, and attract attention
@@ -477,6 +481,7 @@ def test_api_keys_repr_str():
         'e2b_api_key',
         'modal_api_token_id',
         'modal_api_token_secret',
+        'runloop_api_key',
     ]
     for attr_name in dir(AppConfig):
         if (

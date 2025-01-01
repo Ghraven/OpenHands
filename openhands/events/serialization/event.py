@@ -83,6 +83,9 @@ def event_to_dict(event: 'Event') -> dict:
     elif 'observation' in d:
         d['content'] = props.pop('content', '')
         d['extras'] = props
+        # Include success field for CmdOutputObservation
+        if hasattr(event, 'success'):
+            d['success'] = event.success
     else:
         raise ValueError('Event must be either action or observation')
     return d
@@ -101,7 +104,7 @@ def event_to_memory(event: 'Event', max_message_chars: int) -> dict:
     d.pop('cause', None)
     d.pop('timestamp', None)
     d.pop('message', None)
-    d.pop('images_urls', None)
+    d.pop('image_urls', None)
 
     # runnable actions have some extra fields used in the BE/FE, which should not be sent to the LLM
     if 'args' in d:

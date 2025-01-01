@@ -15,7 +15,6 @@ Voici un exemple de fichier de configuration que vous pouvez utiliser pour défi
 [llm]
 # IMPORTANT : ajoutez votre clé API ici et définissez le modèle que vous souhaitez évaluer
 model = "claude-3-5-sonnet-20241022"
-
 api_key = "sk-XXX"
 
 [llm.eval_gpt4_1106_preview_llm]
@@ -76,7 +75,7 @@ La fonction `run_controller()` est le cœur de l'exécution d'OpenHands. Elle g�
 
 ## Le moyen le plus simple de commencer : Explorer les benchmarks existants
 
-Nous vous encourageons à examiner les différents benchmarks d'évaluation disponibles dans le [répertoire `evaluation/`](https://github.com/All-Hands-AI/OpenHands/blob/main/evaluation) de notre dépôt.
+Nous vous encourageons à examiner les différents benchmarks d'évaluation disponibles dans le [répertoire `evaluation/benchmarks/`](https://github.com/All-Hands-AI/OpenHands/blob/main/evaluation/benchmarks) de notre dépôt.
 
 Pour intégrer votre propre benchmark, nous vous suggérons de commencer par celui qui ressemble le plus à vos besoins. Cette approche peut considérablement rationaliser votre processus d'intégration, vous permettant de vous appuyer sur les structures existantes et de les adapter à vos exigences spécifiques.
 
@@ -191,7 +190,7 @@ En suivant cette structure, vous pouvez créer un workflow d'évaluation robuste
 
 ## Comprendre la `user_response_fn`
 
-La `user_response_fn` est un composant crucial dans le workflow d'évaluation d'OpenHands. Elle simule l'interaction de l'utilisateur avec l'agent, permettant des réponses automatisées pendant le processus d'évaluation. Cette fonction est particulièrement utile lorsque vous souhaitez fournir des réponses cohérentes et prédéfinies aux requêtes ou actions de l'agent.
+La `user_response_fn` est un composant crucial dans le workflow d'évaluation d'OpenHands. Elle simule l'interaction de l'utilisateur avec l'agent, permettant des réponses automatisées pendant le processus d'évaluation. Cette fonction est particulièrement utile lorsque vous voulez fournir des réponses cohérentes et prédéfinies aux requêtes ou actions de l'agent.
 
 
 ### Workflow et interaction
@@ -242,7 +241,7 @@ Dans ce workflow :
 - Les actions non exécutables (généralement lorsque l'agent veut communiquer ou demander des clarifications) sont gérées par la `user_response_fn`
 - L'agent traite ensuite le feedback, qu'il s'agisse d'une Observation du Runtime ou d'une réponse simulée de la `user_response_fn`
 
-Cette approche permet une gestion automatisée des actions concrètes et des interactions utilisateur simulées, ce qui la rend adaptée aux scénarios d'évaluation où vous souhaitez tester la capacité de l'agent à effectuer des tâches avec une intervention humaine minimale.
+Cette approche permet une gestion automatisée des actions concrètes et des interactions utilisateur simulées, ce qui la rend adaptée aux scénarios d'évaluation où vous voulez tester la capacité de l'agent à accomplir des tâches avec une intervention humaine minimale.
 
 ### Exemple d'implémentation
 
@@ -264,7 +263,7 @@ def codeact_user_response(state: State | None) -> str:
             if isinstance(event, MessageAction) and event.source == 'user'
         ]
         if len(user_msgs) >= 2:
-            # faire savoir à l'agent qu'il peut abandonner lorsqu'il a essayé 3 fois
+            # faire savoir à l'agent qu'il peut abandonner quand il a essayé 3 fois
             return (
                 msg
                 + 'Si vous voulez abandonner, exécutez : <execute_bash> exit </execute_bash>.\n'
@@ -278,4 +277,4 @@ Cette fonction fait ce qui suit :
 2. Vérifie combien de fois l'agent a tenté de communiquer avec l'utilisateur
 3. Si l'agent a fait plusieurs tentatives, il lui donne la possibilité d'abandonner
 
-En utilisant cette fonction, vous pouvez garantir un comportement cohérent sur plusieurs exécutions d'évaluation et empêcher l'agent de rester bloqué en attendant une entrée humaine.
+En utilisant cette fonction, vous pouvez assurer un comportement cohérent sur plusieurs exécutions d'évaluation et empêcher l'agent de rester bloqué en attendant une entrée humaine.

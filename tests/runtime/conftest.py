@@ -12,14 +12,15 @@ from openhands.core.config import load_app_config
 from openhands.core.logger import openhands_logger as logger
 from openhands.events import EventStream
 from openhands.runtime.base import Runtime
-from openhands.runtime.impl.eventstream.eventstream_runtime import EventStreamRuntime
+from openhands.runtime.impl.docker.docker_runtime import DockerRuntime
 from openhands.runtime.impl.remote.remote_runtime import RemoteRuntime
+from openhands.runtime.impl.runloop.runloop_runtime import RunloopRuntime
 from openhands.runtime.plugins import AgentSkillsRequirement, JupyterRequirement
 from openhands.storage import get_file_store
 from openhands.utils.async_utils import call_async_from_sync
 
 TEST_IN_CI = os.getenv('TEST_IN_CI', 'False').lower() in ['true', '1', 'yes']
-TEST_RUNTIME = os.getenv('TEST_RUNTIME', 'eventstream').lower()
+TEST_RUNTIME = os.getenv('TEST_RUNTIME', 'docker').lower()
 RUN_AS_OPENHANDS = os.getenv('RUN_AS_OPENHANDS', 'True').lower() in ['true', '1', 'yes']
 test_mount_path = ''
 project_dir = os.path.dirname(
@@ -28,16 +29,16 @@ project_dir = os.path.dirname(
 sandbox_test_folder = '/openhands/workspace'
 
 
-def _get_runtime_sid(runtime: Runtime):
+def _get_runtime_sid(runtime: Runtime) -> str:
     logger.debug(f'\nruntime.sid: {runtime.sid}')
     return runtime.sid
 
 
-def _get_host_folder(runtime: Runtime):
+def _get_host_folder(runtime: Runtime) -> str:
     return runtime.config.workspace_mount_path
 
 
-def _get_sandbox_folder(runtime: Runtime):
+def _get_sandbox_folder(runtime: Runtime) -> Path | None:
     sid = _get_runtime_sid(runtime)
     if sid:
         return Path(os.path.join(sandbox_test_folder, sid))
@@ -60,15 +61,15 @@ def _remove_folder(folder: str) -> bool:
     return success
 
 
-def _close_test_runtime(runtime: Runtime):
-    if isinstance(runtime, EventStreamRuntime):
+def _close_test_runtime(runtime: Runtime) -> None:
+    if isinstance(runtime, DockerRuntime):
         runtime.close(rm_all_containers=False)
     else:
         runtime.close()
     time.sleep(1)
 
 
-def _reset_pwd():
+def _reset_pwd() -> None:
     global project_dir
     # Try to change back to project directory
     try:
@@ -96,6 +97,7 @@ def print_method_name(request):
 @pytest.fixture
 def temp_dir(tmp_path_factory: TempPathFactory, request) -> str:
     """Creates a unique temporary directory.
+
     Upon finalization, the temporary directory and its content is removed.
     The cleanup function is also called upon KeyboardInterrupt.
 
@@ -125,17 +127,19 @@ def temp_dir(tmp_path_factory: TempPathFactory, request) -> str:
 
 
 # Depending on TEST_RUNTIME, feed the appropriate box class(es) to the test.
-def get_runtime_classes():
+def get_runtime_classes() -> list[type[Runtime]]:
     runtime = TEST_RUNTIME
-    if runtime.lower() == 'eventstream':
-        return [EventStreamRuntime]
+    if runtime.lower() == 'docker' or runtime.lower() == 'eventstream':
+        return [DockerRuntime]
     elif runtime.lower() == 'remote':
         return [RemoteRuntime]
+    elif runtime.lower() == 'runloop':
+        return [RunloopRuntime]
     else:
         raise ValueError(f'Invalid runtime: {runtime}')
 
 
-def get_run_as_openhands():
+def get_run_as_openhands() -> list[bool]:
     print(
         '\n\n########################################################################'
     )
@@ -169,7 +173,7 @@ def runtime_cls(request):
 
 
 # TODO: We will change this to `run_as_user` when `ServerRuntime` is deprecated.
-# since `EventStreamRuntime` supports running as an arbitrary user.
+# since `DockerRuntime` supports running as an arbitrary user.
 @pytest.fixture(scope='module', params=get_run_as_openhands())
 def run_as_openhands(request):
     time.sleep(1)
@@ -221,6 +225,7 @@ def _load_runtime(
     config = load_app_config()
     config.run_as_openhands = run_as_openhands
     config.sandbox.force_rebuild_runtime = force_rebuild_runtime
+    config.sandbox.keep_runtime_alive = False
     # Folder where all tests create their own folder
     global test_mount_path
     if use_workspace:

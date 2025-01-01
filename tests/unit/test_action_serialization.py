@@ -65,7 +65,7 @@ def test_event_props_serialization_deserialization():
         'action': 'message',
         'args': {
             'content': 'This is a test.',
-            'images_urls': None,
+            'image_urls': None,
             'wait_for_response': False,
         },
     }
@@ -77,7 +77,7 @@ def test_message_action_serialization_deserialization():
         'action': 'message',
         'args': {
             'content': 'This is a test.',
-            'images_urls': None,
+            'image_urls': None,
             'wait_for_response': False,
         },
     }
@@ -132,7 +132,14 @@ def test_browse_interactive_action_serialization_deserialization():
 def test_file_read_action_serialization_deserialization():
     original_action_dict = {
         'action': 'read',
-        'args': {'path': '/path/to/file.txt', 'start': 0, 'end': -1, 'thought': 'None'},
+        'args': {
+            'path': '/path/to/file.txt',
+            'start': 0,
+            'end': -1,
+            'thought': 'None',
+            'impl_source': 'default',
+            'translated_ipython_code': '',
+        },
     }
     serialization_deserialization(original_action_dict, FileReadAction)
 

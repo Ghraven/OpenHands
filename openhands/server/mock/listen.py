@@ -3,7 +3,7 @@ from fastapi import FastAPI, WebSocket
 
 from openhands.core.logger import openhands_logger as logger
 from openhands.core.schema import ActionType
-from openhands.runtime.utils.shutdown_listener import should_continue
+from openhands.utils.shutdown_listener import should_continue
 
 app = FastAPI()
 
@@ -56,6 +56,16 @@ def read_llm_agents():
 @app.get('/api/list-files')
 def refresh_files():
     return ['hello_world.py']
+
+
+@app.get('/api/options/config')
+def get_config():
+    return {'APP_MODE': 'oss'}
+
+
+@app.get('/api/options/security-analyzers')
+def get_analyzers():
+    return []
 
 
 if __name__ == '__main__':
