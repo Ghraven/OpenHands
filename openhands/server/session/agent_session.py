@@ -11,6 +11,7 @@ from openhands.core.schema.agent import AgentState
 from openhands.events.action import ChangeAgentStateAction
 from openhands.events.event import EventSource
 from openhands.events.stream import EventStream
+from openhands.microagent import BaseMicroAgent
 from openhands.runtime import get_runtime_cls
 from openhands.runtime.base import Runtime
 from openhands.security import SecurityAnalyzer, options
@@ -130,6 +131,8 @@ class AgentSession:
                     f'Waited too long for initialization to finish before closing session {self.sid}'
                 )
                 break
+        if self.event_stream is not None:
+            self.event_stream.close()
         if self.controller is not None:
             end_state = self.controller.get_state()
             end_state.save_to_session(self.sid, self.file_store)
@@ -201,12 +204,15 @@ class AgentSession:
                 )
             return
 
-        self.runtime.clone_repo(github_token, selected_repository)
-        if agent.prompt_manager:
-            microagents = await call_sync_from_async(
-                self.runtime.get_custom_microagents, selected_repository
+        if selected_repository:
+            await call_sync_from_async(
+                self.runtime.clone_repo, github_token, selected_repository
             )
-            agent.prompt_manager.load_microagent_files(microagents)
+        if agent.prompt_manager:
+            microagents: list[BaseMicroAgent] = await call_sync_from_async(
+                self.runtime.get_microagents_from_selected_repo, selected_repository
+            )
+            agent.prompt_manager.load_microagents(microagents)
 
         logger.debug(
             f'Runtime initialized with plugins: {[plugin.name for plugin in self.runtime.plugins]}'
@@ -268,27 +274,25 @@ class AgentSession:
             confirmation_mode=confirmation_mode,
             headless_mode=False,
             status_callback=self._status_callback,
+            initial_state=self._maybe_restore_state(),
         )
 
-        # Note: We now attempt to restore the state from session here,
-        # but if it fails, we fall back to None and still initialize the controller
-        # with a fresh state. That way, the controller will always load events from the event stream
-        # even if the state file was corrupt.
+        return controller
 
+    def _maybe_restore_state(self) -> State | None:
+        """Helper method to handle state restore logic."""
         restored_state = None
+
+        # Attempt to restore the state from session.
+        # Use a heuristic to figure out if we should have a state:
+        # if we have events in the stream.
         try:
             restored_state = State.restore_from_session(self.sid, self.file_store)
+            logger.debug(f'Restored state from session, sid: {self.sid}')
         except Exception as e:
             if self.event_stream.get_latest_event_id() > 0:
                 # if we have events, we should have a state
                 logger.warning(f'State could not be restored: {e}')
-
-        # Set the initial state through the controller.
-        controller.set_initial_state(restored_state, max_iterations, confirmation_mode)
-        if restored_state:
-            logger.debug(f'Restored agent state from session, sid: {self.sid}')
-        else:
-            logger.debug('New session state created.')
-
-        logger.debug('Agent controller initialized.')
-        return controller
+            else:
+                logger.debug('No events found, no state to restore')
+        return restored_state
