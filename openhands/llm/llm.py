@@ -139,8 +139,25 @@ class LLM(RetryMixin, DebugMixin):
         # set up the completion function
         kwargs: dict[str, Any] = {
             'temperature': self.config.temperature,
+            'top_p': self.config.top_p,
             'max_completion_tokens': self.config.max_output_tokens,
+            'extra_headers': {'anthropic-beta': 'output-128k-2025-02-19'},
         }
+
+        # if 'claude-3-7-sonnet' in self.config.model:
+        kwargs['thinking'] = {
+            'type': 'enabled',
+            # 'budget_tokens': 30720,  # 32768 - 2048
+            # 'budget_tokens': 62000, # 64000 - 2000
+            'budget_tokens': 120000,  # 128000 - 8000
+        }
+        # kwargs['max_completion_tokens'] = 32768
+        # kwargs['max_completion_tokens'] = 64000
+        kwargs['max_completion_tokens'] = 128000
+        kwargs.pop('temperature')
+        kwargs.pop('top_p')
+        logger.info(f'Setting thinking for {self.config.model} with kwargs: {kwargs}')
+
         if (
             self.config.model.lower() in REASONING_EFFORT_SUPPORTED_MODELS
             or self.config.model.split('/')[-1] in REASONING_EFFORT_SUPPORTED_MODELS
@@ -164,7 +181,6 @@ class LLM(RetryMixin, DebugMixin):
             api_version=self.config.api_version,
             custom_llm_provider=self.config.custom_llm_provider,
             timeout=self.config.timeout,
-            top_p=self.config.top_p,
             drop_params=self.config.drop_params,
             **kwargs,
         )
