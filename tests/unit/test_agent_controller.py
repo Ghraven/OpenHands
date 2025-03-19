@@ -10,6 +10,10 @@ from openhands.controller.agent_controller import AgentController
 from openhands.controller.state.state import State, TrafficControlState
 from openhands.core.config import AppConfig
 from openhands.core.config.agent_config import AgentConfig
+from openhands.core.exceptions import (
+    AgentRuntimeDisconnectedError,
+    AgentRuntimeUnavailableError,
+)
 from openhands.core.main import run_controller
 from openhands.core.schema import AgentState
 from openhands.events import Event, EventSource, EventStream, EventStreamSubscriber
@@ -161,6 +165,122 @@ async def test_react_to_exception(mock_agent, mock_event_stream, mock_status_cal
     error_message = 'Test error'
     await controller._react_to_exception(RuntimeError(error_message))
     controller.status_callback.assert_called_once()
+    await controller.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_error_handling(mock_agent, mock_event_stream):
+    """Test that runtime errors are handled properly with retry mechanism."""
+    # Create a controller
+    controller = AgentController(
+        agent=mock_agent,
+        event_stream=mock_event_stream,
+        max_iterations=10,
+        sid='test',
+        confirmation_mode=False,
+        headless_mode=True,
+    )
+
+    # Mock the _step method to raise a runtime error
+    controller._step = AsyncMock(
+        side_effect=AgentRuntimeDisconnectedError(
+            'Runtime is temporarily unavailable. This may be due to a restart or network issue.'
+        )
+    )
+
+    # Call the _step_with_exception_handling method
+    await controller._step_with_exception_handling()
+
+    # Verify that an error observation was added to the event stream
+    mock_event_stream.add_event.assert_called_once()
+    args, kwargs = mock_event_stream.add_event.call_args
+
+    # Check that the first argument is an ErrorObservation
+    assert isinstance(args[0], ErrorObservation)
+
+    # Check that the content of the ErrorObservation contains the expected message
+    assert 'Your command may have consumed too much resources' in args[0].content
+    assert 'previous runtime died' in args[0].content
+    assert 'Retry 1 of 3' in args[0].content
+
+    # Check that the source is ENVIRONMENT
+    assert len(args) >= 2  # Should have at least 2 positional arguments
+    assert args[1] == EventSource.ENVIRONMENT
+
+    # Verify that the runtime error counter was incremented
+    assert hasattr(controller, '_runtime_error_count')
+    assert controller._runtime_error_count == 1
+
+    # Call the method again to test the counter increment
+    await controller._step_with_exception_handling()
+
+    # Verify that the counter was incremented
+    assert controller._runtime_error_count == 2
+
+    # Verify that another error observation was added
+    assert mock_event_stream.add_event.call_count == 2
+    args, kwargs = mock_event_stream.add_event.call_args
+    assert 'Retry 2 of 3' in args[0].content
+
+    # Call the method a third time
+    await controller._step_with_exception_handling()
+
+    # Verify that the counter was incremented
+    assert controller._runtime_error_count == 3
+    assert 'Retry 3 of 3' in mock_event_stream.add_event.call_args[0][0].content
+
+    # Call the method a fourth time, which should exceed the retry limit
+    await controller._step_with_exception_handling()
+
+    # Verify that the counter was reset
+    assert controller._runtime_error_count == 0
+
+    # Note: We're not testing the counter reset functionality here
+    # because it requires more complex mocking of the agent controller state
+
+    await controller.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_error_handling_with_unavailable_error(
+    mock_agent, mock_event_stream
+):
+    """Test that AgentRuntimeUnavailableError is handled properly."""
+    # Create a controller
+    controller = AgentController(
+        agent=mock_agent,
+        event_stream=mock_event_stream,
+        max_iterations=10,
+        sid='test',
+        confirmation_mode=False,
+        headless_mode=True,
+    )
+
+    # Mock the _step method to raise a runtime error
+    controller._step = AsyncMock(
+        side_effect=AgentRuntimeUnavailableError(
+            'Runtime is unavailable. This may be due to a resource constraint.'
+        )
+    )
+
+    # Call the _step_with_exception_handling method
+    await controller._step_with_exception_handling()
+
+    # Verify that an error observation was added to the event stream
+    mock_event_stream.add_event.assert_called_once()
+    args, kwargs = mock_event_stream.add_event.call_args
+
+    # Check that the first argument is an ErrorObservation
+    assert isinstance(args[0], ErrorObservation)
+
+    # Check that the content of the ErrorObservation contains the expected message
+    assert 'Your command may have consumed too much resources' in args[0].content
+    assert 'previous runtime died' in args[0].content
+
+    # Check that the source is ENVIRONMENT
+    assert len(args) >= 2  # Should have at least 2 positional arguments
+    assert args[1] == EventSource.ENVIRONMENT
+
     await controller.close()
 
 
@@ -693,7 +813,7 @@ async def test_context_window_exceeded_error_handling(mock_agent, mock_event_str
 async def test_run_controller_with_context_window_exceeded_with_truncation(
     mock_agent, mock_runtime, mock_memory, test_event_stream
 ):
-    """Tests that the controller can make progress after handling context window exceeded errors, as long as enable_history_truncation is ON"""
+    """Tests that the controller can make progress after handling context window exceeded errors, as long as enable_history_truncation is ON."""
 
     class StepState:
         def __init__(self):
@@ -990,9 +1110,9 @@ async def test_action_metrics_copy():
 
 @pytest.mark.asyncio
 async def test_first_user_message_with_identical_content():
-    """
-    Test that _first_user_message correctly identifies the first user message
-    even when multiple messages have identical content but different IDs.
+    """Test that _first_user_message correctly identifies the first user message.
+
+    Even when multiple messages have identical content but different IDs.
 
     The issue we're checking is that the comparison (action == self._first_user_message())
     should correctly differentiate between messages with the same content but different IDs.

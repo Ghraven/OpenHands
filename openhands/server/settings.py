@@ -16,9 +16,7 @@ from openhands.integrations.provider import SecretStore
 
 
 class Settings(BaseModel):
-    """
-    Persisted settings for OpenHands sessions
-    """
+    """Persisted settings for OpenHands sessions."""
 
     language: str | None = None
     agent: str | None = None
@@ -103,9 +101,7 @@ class Settings(BaseModel):
 
 
 class POSTSettingsModel(Settings):
-    """
-    Settings for POST requests
-    """
+    """Settings for POST requests."""
 
     unset_github_token: bool | None = None
     # Override provider_tokens to accept string tokens from frontend
@@ -117,8 +113,6 @@ class POSTSettingsModel(Settings):
 
 
 class GETSettingsModel(Settings):
-    """
-    Settings with additional token data for the frontend
-    """
+    """Settings with additional token data for the frontend."""
 
     github_token_is_set: bool | None = None
