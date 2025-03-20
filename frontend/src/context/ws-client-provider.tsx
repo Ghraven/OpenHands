@@ -49,12 +49,14 @@ interface UseWsClient {
   isLoadingMessages: boolean;
   events: Record<string, unknown>[];
   send: (event: Record<string, unknown>) => void;
+  pendingMessages: Record<string, unknown>[];
 }
 
 const WsClientContext = React.createContext<UseWsClient>({
   status: WsClientProviderStatus.DISCONNECTED,
   isLoadingMessages: true,
   events: [],
+  pendingMessages: [],
   send: () => {
     throw new Error("not connected");
   },
@@ -109,26 +111,43 @@ export function WsClientProvider({
     WsClientProviderStatus.DISCONNECTED,
   );
   const [events, setEvents] = React.useState<Record<string, unknown>[]>([]);
+  const [pendingMessages, setPendingMessages] = React.useState<
+    Record<string, unknown>[]
+  >([]);
   const lastEventRef = React.useRef<Record<string, unknown> | null>(null);
 
   const messageRateHandler = useRate({ threshold: 250 });
 
+  // Private function to queue messages for later sending
+  const queueMessage = (event: Record<string, unknown>) => {
+    EventLogger.info(`Queueing message: ${JSON.stringify(event)}`);
+    setPendingMessages((prev) => [...prev, event]);
+  };
+
   function send(event: Record<string, unknown>) {
     if (!sioRef.current) {
-      EventLogger.error("WebSocket is not connected.");
+      EventLogger.info("WebSocket is not connected, queueing message");
+      queueMessage(event);
       return;
     }
+
+    // Send the message to the backend
+    EventLogger.info(`Sending message: ${JSON.stringify(event)}`);
     sioRef.current.emit("oh_action", event);
   }
 
   function handleConnect() {
     setStatus(WsClientProviderStatus.CONNECTED);
+    EventLogger.info(
+      `WebSocket connected. Pending messages: ${pendingMessages.length}`,
+    );
   }
 
   function handleMessage(event: Record<string, unknown>) {
     if (isOpenHandsEvent(event) && isMessageAction(event)) {
       messageRateHandler.record(new Date().getTime());
     }
+
     setEvents((prevEvents) => [...prevEvents, event]);
     if (!Number.isNaN(parseInt(event.id as string, 10))) {
       lastEventRef.current = event;
@@ -145,13 +164,38 @@ export function WsClientProvider({
     }
     sio.io.opts.query = sio.io.opts.query || {};
     sio.io.opts.query.latest_event_id = lastEventRef.current?.id;
+    EventLogger.info(
+      `WebSocket disconnected. Latest event ID: ${lastEventRef.current?.id}`,
+    );
     updateStatusWhenErrorMessagePresent(data);
   }
 
   function handleError(data: unknown) {
     setStatus(WsClientProviderStatus.DISCONNECTED);
+    EventLogger.error(`WebSocket connection error: ${JSON.stringify(data)}`);
     updateStatusWhenErrorMessagePresent(data);
   }
+
+  // Process any pending messages when the WebSocket connects
+  React.useEffect(() => {
+    if (
+      status === WsClientProviderStatus.CONNECTED &&
+      pendingMessages.length > 0 &&
+      sioRef.current
+    ) {
+      // We're connected and have pending messages
+      EventLogger.info(
+        `Connected! Sending ${pendingMessages.length} queued messages`,
+      );
+
+      pendingMessages.forEach((event) => {
+        sioRef.current?.emit("oh_action", event);
+      });
+
+      setPendingMessages([]);
+      EventLogger.info("All queued messages sent, queue cleared");
+    }
+  }, [status, pendingMessages.length]);
 
   React.useEffect(() => {
     lastEventRef.current = null;
@@ -210,9 +254,10 @@ export function WsClientProvider({
       status,
       isLoadingMessages: messageRateHandler.isUnderThreshold,
       events,
+      pendingMessages,
       send,
     }),
-    [status, messageRateHandler.isUnderThreshold, events],
+    [status, messageRateHandler.isUnderThreshold, events, pendingMessages],
   );
 
   return <WsClientContext value={value}>{children}</WsClientContext>;
