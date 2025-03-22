@@ -107,6 +107,10 @@ export function SettingsForm({ settings, models, onClose }: SettingsFormProps) {
           />
         </div>
 
+        <div className="flex flex-col gap-4">
+          <h2 className="text-base font-medium">Additional Settings</h2>
+        </div>
+
         <div className="flex flex-col gap-2">
           <BrandButton
             testId="save-settings-button"

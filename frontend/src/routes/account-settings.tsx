@@ -1,5 +1,8 @@
 import React from "react";
 import { Link } from "react-router";
+import { cn } from "@heroui/react";
+import PlusIcon from "#/icons/plus.svg?react";
+import CloseIcon from "#/icons/close.svg?react";
 import { BrandButton } from "#/components/features/settings/brand-button";
 import { HelpLink } from "#/components/features/settings/help-link";
 import { KeyStatusIcon } from "#/components/features/settings/key-status-icon";
@@ -25,7 +28,8 @@ import {
   displayErrorToast,
   displaySuccessToast,
 } from "#/utils/custom-toast-handlers";
-import { PostSettings } from "#/types/settings";
+import { PostSettings, ProviderOptions } from "#/types/settings";
+import { useAuth } from "#/context/auth-context";
 
 const REMOTE_RUNTIME_OPTIONS = [
   { key: 1, label: "1x (2 core, 8G)" },
@@ -47,6 +51,7 @@ function AccountSettings() {
   } = useAIConfigOptions();
   const { mutate: saveSettings } = useSaveSettings();
   const { handleLogout } = useAppLogout();
+  const { providerTokensSet, providersAreSet } = useAuth();
 
   const isFetching = isFetchingSettings || isFetchingResources;
   const isSuccess = isSuccessfulSettings && isSuccessfulResources;
@@ -63,7 +68,6 @@ function AccountSettings() {
         isCustomModel(resources.models, settings.LLM_MODEL) ||
         hasAdvancedSettingsSet({
           ...settings,
-          PROVIDER_TOKENS: settings.PROVIDER_TOKENS || {},
         })
       );
     }
@@ -72,7 +76,16 @@ function AccountSettings() {
   };
 
   const hasAppSlug = !!config?.APP_SLUG;
-  const isGitHubTokenSet = settings?.GITHUB_TOKEN_IS_SET;
+  const isGitHubTokenSet =
+    providerTokensSet.includes(ProviderOptions.github) || false;
+  const isGitLabTokenSet =
+    providerTokensSet.includes(ProviderOptions.gitlab) || false;
+  const [secrets, setSecrets] = React.useState(
+    Object.entries(settings?.CUSTOM_SECRETS || {}),
+  );
+
+  const [secretsToDelete, setSecretsToDelete] = React.useState<number[]>([]);
+
   const isLLMKeySet = settings?.LLM_API_KEY === "**********";
   const isAnalyticsEnabled = settings?.USER_CONSENTS_TO_ANALYTICS;
   const isAdvancedSettingsSet = determineWhetherToToggleAdvancedSettings();
@@ -88,6 +101,11 @@ function AccountSettings() {
     React.useState(!!settings?.SECURITY_ANALYZER);
   const [resetSettingsModalIsOpen, setResetSettingsModalIsOpen] =
     React.useState(false);
+
+  React.useEffect(() => {
+    setSecrets(Object.entries(settings?.CUSTOM_SECRETS || {}));
+    setSecretsToDelete([]);
+  }, [settings?.CUSTOM_SECRETS]);
 
   const formRef = React.useRef<HTMLFormElement>(null);
 
@@ -122,6 +140,8 @@ function AccountSettings() {
         ? undefined // don't update if it's already set
         : ""); // reset if it's first time save to avoid 500 error
 
+    const githubToken = formData.get("github-token-input")?.toString();
+    const gitlabToken = formData.get("gitlab-token-input")?.toString();
     // we don't want the user to be able to modify these settings in SaaS
     const finalLlmModel = shouldHandleSpecialSaasCase
       ? undefined
@@ -131,15 +151,26 @@ function AccountSettings() {
       : llmBaseUrl;
     const finalLlmApiKey = shouldHandleSpecialSaasCase ? undefined : llmApiKey;
 
-    const githubToken = formData.get("github-token-input")?.toString();
+    const secretsEntries: Record<string, string> = {};
+
+    secrets.forEach((_, index) => {
+      const name = formData.get(`secret-name-${index}`)?.toString().trim();
+      const value = formData.get(`secret-value-${index}`)?.toString();
+
+      if (name && !secretsToDelete.includes(index)) {
+        secretsEntries[name] = value || "";
+      }
+    });
+
     const newSettings = {
-      github_token: githubToken,
-      provider_tokens: githubToken
-        ? {
-            github: githubToken,
-            gitlab: "",
-          }
-        : undefined,
+      provider_tokens:
+        githubToken || gitlabToken
+          ? {
+              github: githubToken || "",
+              gitlab: gitlabToken || "",
+            }
+          : undefined,
+      custom_secrets: secretsEntries,
       LANGUAGE: languageValue,
       user_consents_to_analytics: userConsentsToAnalytics,
       ENABLE_DEFAULT_CONDENSER: enableMemoryCondenser,
@@ -173,6 +204,11 @@ function AccountSettings() {
     const newSettings: Partial<PostSettings> = {
       ...DEFAULT_SETTINGS,
       LLM_API_KEY: "", // reset LLM API key
+      provider_tokens: {
+        github: "",
+        gitlab: "",
+      },
+      custom_secrets: {},
     };
 
     // we don't want the user to be able to modify these settings in SaaS
@@ -218,6 +254,16 @@ function AccountSettings() {
       </div>
     );
   }
+
+  const handleAddSecret = () => {
+    setSecrets([...secrets, ["", ""]]);
+  };
+
+  const markSecretDeletion = (index: number, isSecretMarked: boolean) => {
+    if (isSecretMarked) {
+      setSecretsToDelete(secretsToDelete.filter((item) => item !== index));
+    } else setSecretsToDelete([...secretsToDelete, index]);
+  };
 
   return (
     <>
@@ -381,7 +427,7 @@ function AccountSettings() {
 
           <section className="flex flex-col gap-6">
             <h2 className="text-[28px] leading-8 tracking-[-0.02em] font-bold">
-              GitHub Settings
+              Git Provider Settings
             </h2>
             {isSaas && hasAppSlug && (
               <Link
@@ -409,6 +455,7 @@ function AccountSettings() {
                   }
                   placeholder={isGitHubTokenSet ? "**********" : ""}
                 />
+
                 <p data-testId="github-token-help-anchor" className="text-xs">
                   {" "}
                   Generate a token on{" "}
@@ -436,6 +483,48 @@ function AccountSettings() {
                   </b>
                   .
                 </p>
+
+                <SettingsInput
+                  testId="gitlab-token-input"
+                  name="gitlab-token-input"
+                  label="GitLab Token"
+                  type="password"
+                  className="w-[680px]"
+                  startContent={
+                    isGitLabTokenSet && (
+                      <KeyStatusIcon isSet={!!isGitLabTokenSet} />
+                    )
+                  }
+                  placeholder={isGitLabTokenSet ? "**********" : ""}
+                />
+
+                <p data-testId="gitlab-token-help-anchor" className="text-xs">
+                  {" "}
+                  Generate a token on{" "}
+                  <b>
+                    {" "}
+                    <a
+                      href="https://gitlab.com/-/user_settings/personal_access_tokens?name=openhands-app&scopes=api,read_user,read_repository,write_repository"
+                      target="_blank"
+                      className="underline underline-offset-2"
+                      rel="noopener noreferrer"
+                    >
+                      GitLab
+                    </a>{" "}
+                  </b>
+                  or see the{" "}
+                  <b>
+                    <a
+                      href="https://docs.gitlab.com/user/profile/personal_access_tokens/"
+                      target="_blank"
+                      className="underline underline-offset-2"
+                      rel="noopener noreferrer"
+                    >
+                      documentation
+                    </a>
+                  </b>
+                  .
+                </p>
               </>
             )}
 
@@ -443,10 +532,83 @@ function AccountSettings() {
               type="button"
               variant="secondary"
               onClick={handleLogout}
-              isDisabled={!isGitHubTokenSet}
+              isDisabled={!providersAreSet}
             >
-              Disconnect from GitHub
+              Disconnect Tokens
             </BrandButton>
+          </section>
+
+          <section className="flex flex-col gap-6">
+            <div className="flex justify-between items-center">
+              <h2 className="text-[28px] font-bold">Custom Secrets</h2>
+              <button
+                type="button"
+                onClick={handleAddSecret}
+                className="p-2 text-primary hover:text-primary/80"
+              >
+                <PlusIcon className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex flex-col gap-4">
+              {secrets.map(([secretName, secretValue], index) => {
+                const isMarkedForDeletion = secretsToDelete.includes(index);
+
+                return (
+                  <div
+                    key={`${secretName}-${index}`}
+                    className={cn(
+                      "flex items-end gap-2",
+                      isMarkedForDeletion && "opacity-50",
+                    )}
+                  >
+                    <SettingsInput
+                      name={`secret-name-${index}`}
+                      placeholder="Secret Name"
+                      defaultValue={secretName}
+                      className="w-[330px]"
+                      label="Secret Name"
+                      type="text"
+                      isDisabled={isMarkedForDeletion}
+                    />
+                    <SettingsInput
+                      name={`secret-value-${index}`}
+                      type="password"
+                      placeholder={
+                        Object.keys(settings?.CUSTOM_SECRETS || {}).includes(
+                          secretName,
+                        )
+                          ? "**********"
+                          : ""
+                      }
+                      defaultValue={secretValue}
+                      className="w-[330px]"
+                      label="Secret Value"
+                      isDisabled={isMarkedForDeletion}
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        markSecretDeletion(index, isMarkedForDeletion)
+                      }
+                      className="flex items-center justify-center h-10 p-1 text-gray-400 hover:text-gray-300"
+                    >
+                      {isMarkedForDeletion ? (
+                        <span className="text-xs text-blue-400 hover:underline">
+                          Undo
+                        </span>
+                      ) : (
+                        <CloseIcon className="h-5 w-5" />
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+              {secretsToDelete.length > 0 && (
+                <p className="text-xs text-red-400 italic">
+                  Disabled secrets will be deleted when you save changes.
+                </p>
+              )}
+            </div>
           </section>
 
           <section className="flex flex-col gap-6">

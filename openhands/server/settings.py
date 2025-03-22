@@ -64,10 +64,12 @@ class Settings(BaseModel):
             return data
 
         tokens = secrets_store.get('provider_tokens')
-        if not isinstance(tokens, dict):
-            return data
+        custom_secrets = secrets_store.get('custom_secrets')
 
-        data['secrets_store'] = SecretStore(provider_tokens=tokens)
+        data['secrets_store'] = SecretStore(
+            provider_tokens=tokens, custom_secrets=custom_secrets
+        )
+
         return data
 
     @field_serializer('secrets_store')
@@ -76,7 +78,10 @@ class Settings(BaseModel):
         return {
             'provider_tokens': secrets.provider_tokens_serializer(
                 secrets.provider_tokens, info
-            )
+            ),
+            'custom_secrets': secrets.custom_secrets_serializer(
+                secrets.custom_secrets, info
+            ),
         }
 
     @staticmethod
@@ -107,13 +112,9 @@ class POSTSettingsModel(Settings):
     Settings for POST requests
     """
 
-    unset_github_token: bool | None = None
-    # Override provider_tokens to accept string tokens from frontend
+    unset_tokens: bool | None = None
     provider_tokens: dict[str, str] = {}
-
-    @field_serializer('provider_tokens')
-    def provider_tokens_serializer(self, provider_tokens: dict[str, str]):
-        return provider_tokens
+    custom_secrets: dict[str, str] = {}
 
 
 class GETSettingsModel(Settings):
@@ -121,4 +122,5 @@ class GETSettingsModel(Settings):
     Settings with additional token data for the frontend
     """
 
-    github_token_is_set: bool | None = None
+    provider_tokens_set: dict[str, bool] | None = None
+    custom_secrets: dict[str, str] | None = None

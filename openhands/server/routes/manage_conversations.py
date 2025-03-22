@@ -79,6 +79,7 @@ async def _create_new_conversation(
         raise MissingSettingsError('Settings not found')
 
     session_init_args['git_provider_tokens'] = git_provider_tokens
+    session_init_args['custom_secrets'] = settings.secrets_store.custom_secrets
     session_init_args['selected_repository'] = selected_repository
     session_init_args['selected_branch'] = selected_branch
     conversation_init_data = ConversationInitData(**session_init_args)

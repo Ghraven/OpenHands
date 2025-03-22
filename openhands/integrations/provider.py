@@ -64,6 +64,8 @@ class SecretStore(BaseModel):
         default_factory=lambda: MappingProxyType({})
     )
 
+    custom_secrets: CUSTOM_SECRETS_TYPE | None = Field(default_factory=None)
+
     model_config = {
         'frozen': True,
         'validate_assignment': True,
@@ -95,17 +97,32 @@ class SecretStore(BaseModel):
 
         return tokens
 
+    @field_serializer('custom_secrets')
+    def custom_secrets_serializer(
+        self, custom_secrets: CUSTOM_SECRETS_TYPE, info: SerializationInfo
+    ):
+        secrets = {}
+        expose_secrets = info.context and info.context.get('expose_secrets', False)
+
+        if custom_secrets:
+            for secret_name, secret_key in custom_secrets.items():
+                secrets[secret_name] = (
+                    secret_key.get_secret_value()
+                    if expose_secrets
+                    else pydantic_encoder(secret_key)
+                )
+        return secrets
+
     @model_validator(mode='before')
     @classmethod
     def convert_dict_to_mappingproxy(
-        cls, data: dict[str, dict[str, dict[str, str]]] | PROVIDER_TOKEN_TYPE
-    ) -> dict[str, MappingProxyType]:
+        cls, data: dict[str, dict[str, Any]] | PROVIDER_TOKEN_TYPE
+    ) -> dict[str, MappingProxyType | None]:
         """Custom deserializer to convert dictionary into MappingProxyType"""
         if not isinstance(data, dict):
             raise ValueError('SecretStore must be initialized with a dictionary')
 
-        new_data = {}
-
+        new_data: dict[str, MappingProxyType | None] = {}
         if 'provider_tokens' in data:
             tokens = data['provider_tokens']
             if isinstance(
@@ -113,6 +130,9 @@ class SecretStore(BaseModel):
             ):  # Ensure conversion happens only for dict inputs
                 converted_tokens = {}
                 for key, value in tokens.items():
+                    if not isinstance(value, dict):
+                        continue
+
                     try:
                         provider_type = (
                             ProviderType(key) if isinstance(key, str) else key
@@ -126,7 +146,19 @@ class SecretStore(BaseModel):
 
                 # Convert to MappingProxyType
                 new_data['provider_tokens'] = MappingProxyType(converted_tokens)
+        if 'custom_secrets' in data:
+            secrets = data['custom_secrets']
+            if isinstance(secrets, dict):
+                converted_secrets = {}
+                for key, value in secrets.items():
+                    if isinstance(value, str):
+                        converted_secrets[key] = SecretStr(value)
+                    elif isinstance(value, SecretStr):
+                        converted_secrets[key] = value
 
+                new_data['custom_secrets'] = MappingProxyType(converted_secrets)
+        else:
+            new_data['custom_secrets'] = None
         return new_data
 
 
@@ -188,20 +220,47 @@ class ProviderHandler:
         return await service.get_latest_token()
 
     async def get_repositories(
-        self, page: int, per_page: int, sort: str, installation_id: int | None
+        self,
+        selected_provider: ProviderType,
+        page: int,
+        per_page: int,
+        sort: str,
+        installation_id: int | None,
     ) -> list[Repository]:
-        """Get repositories from all available providers"""
-        all_repos = []
+        """
+        Get repositories from a selected providers with pagination support
+        """
+
+        provider = self._get_service(selected_provider)
+        repos = await provider.get_repositories(page, per_page, sort, installation_id)
+        return repos
+
+    async def search_repositories(
+        self,
+        selected_provider: ProviderType,
+        query: str,
+        per_page: int,
+        sort: str,
+        order: str,
+    ):
+        provider = self._get_service(selected_provider)
+        repos = await provider.search_repositories(query, per_page, sort, order)
+        return repos
+
+    async def get_remote_repository_url(self, repository: str) -> str | None:
+        if not repository:
+            return None
+
         for provider in self.provider_tokens:
             try:
                 service = self._get_service(provider)
-                repos = await service.get_repositories(
-                    page, per_page, sort, installation_id
-                )
-                all_repos.extend(repos)
+                if service.does_repo_exist(repository):
+                    git_token = self.provider_tokens[provider].token
+                    if git_token:
+                        return f'https://{git_token.get_secret_value()}@github.com/{repository}.git'
             except Exception:
                 continue
-        return all_repos
+        return None
 
     async def set_event_stream_secrets(
         self,

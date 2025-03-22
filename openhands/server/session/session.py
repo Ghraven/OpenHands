@@ -137,10 +137,12 @@ class Session:
         git_provider_tokens = None
         selected_repository = None
         selected_branch = None
+        custom_secrets = None
         if isinstance(settings, ConversationInitData):
             git_provider_tokens = settings.git_provider_tokens
             selected_repository = settings.selected_repository
             selected_branch = settings.selected_branch
+            custom_secrets = settings.custom_secrets
 
         try:
             await self.agent_session.start(
@@ -151,6 +153,7 @@ class Session:
                 max_budget_per_task=self.config.max_budget_per_task,
                 agent_to_llm_config=self.config.get_agent_to_llm_config_map(),
                 agent_configs=self.config.get_agent_configs(),
+                custom_secrets=custom_secrets,
                 git_provider_tokens=git_provider_tokens,
                 selected_repository=selected_repository,
                 selected_branch=selected_branch,
