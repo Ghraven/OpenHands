@@ -23,6 +23,7 @@ from openhands.events.action.files import (
     FileWriteAction,
 )
 from openhands.events.action.message import MessageAction
+from openhands.events.action.search_engine import SearchAction
 
 actions = (
     NullAction,
@@ -40,6 +41,7 @@ actions = (
     RecallAction,
     ChangeAgentStateAction,
     MessageAction,
+    SearchAction,
     CondensationAction,
 )
 
