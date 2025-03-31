@@ -214,6 +214,7 @@ class ConversationMemory:
                 if assistant_msg.content is not None
                 else [],
                 tool_calls=assistant_msg.tool_calls,
+                source=action,
             )
             return []
         elif isinstance(action, AgentFinishAction):
@@ -245,6 +246,7 @@ class ConversationMemory:
                 Message(
                     role=role,  # type: ignore[arg-type]
                     content=[TextContent(text=action.thought)],
+                    source=action,  # Link the originating Action
                 )
             ]
         elif isinstance(action, MessageAction):
@@ -258,6 +260,7 @@ class ConversationMemory:
                 Message(
                     role=role,  # type: ignore[arg-type]
                     content=content,
+                    source=action,  # Link the originating Action
                 )
             ]
         elif isinstance(action, CmdRunAction) and action.source == 'user':
@@ -268,6 +271,7 @@ class ConversationMemory:
                 Message(
                     role='user',  # Always user for CmdRunAction
                     content=content,
+                    source=action,  # Link the originating Action
                 )
             ]
         return []
@@ -323,7 +327,7 @@ class ConversationMemory:
                 )
             else:
                 text = truncate_content(obs.to_agent_observation(), max_message_chars)
-            message = Message(role='user', content=[TextContent(text=text)])
+            message = Message(role='user', content=[TextContent(text=text)], source=obs)
         elif isinstance(obs, IPythonRunCellObservation):
             text = obs.content
             # replace base64 images with a placeholder
@@ -335,13 +339,13 @@ class ConversationMemory:
                     )
             text = '\n'.join(splitted)
             text = truncate_content(text, max_message_chars)
-            message = Message(role='user', content=[TextContent(text=text)])
+            message = Message(role='user', content=[TextContent(text=text)], source=obs)
         elif isinstance(obs, FileEditObservation):
             text = truncate_content(str(obs), max_message_chars)
-            message = Message(role='user', content=[TextContent(text=text)])
+            message = Message(role='user', content=[TextContent(text=text)], source=obs)
         elif isinstance(obs, FileReadObservation):
             message = Message(
-                role='user', content=[TextContent(text=obs.content)]
+                role='user', content=[TextContent(text=obs.content)], source=obs
             )  # Content is already truncated by openhands-aci
         elif isinstance(obs, BrowserOutputObservation):
             text = obs.get_agent_obs_text()
@@ -366,6 +370,7 @@ class ConversationMemory:
                             ]
                         ),
                     ],
+                    source=obs,
                 )
                 logger.debug(
                     f'Vision enabled for browsing, showing {"set of marks" if obs.set_of_marks and len(obs.set_of_marks) > 0 else "screenshot"}'
@@ -374,6 +379,7 @@ class ConversationMemory:
                 message = Message(
                     role='user',
                     content=[TextContent(text=text)],
+                    source=obs,
                 )
                 logger.debug('Vision disabled for browsing, showing text')
         elif isinstance(obs, AgentDelegateObservation):
@@ -381,21 +387,21 @@ class ConversationMemory:
                 obs.outputs['content'] if 'content' in obs.outputs else '',
                 max_message_chars,
             )
-            message = Message(role='user', content=[TextContent(text=text)])
+            message = Message(role='user', content=[TextContent(text=text)], source=obs)
         elif isinstance(obs, AgentThinkObservation):
             text = truncate_content(obs.content, max_message_chars)
-            message = Message(role='user', content=[TextContent(text=text)])
+            message = Message(role='user', content=[TextContent(text=text)], source=obs)
         elif isinstance(obs, ErrorObservation):
             text = truncate_content(obs.content, max_message_chars)
             text += '\n[Error occurred in processing last action]'
-            message = Message(role='user', content=[TextContent(text=text)])
+            message = Message(role='user', content=[TextContent(text=text)], source=obs)
         elif isinstance(obs, UserRejectObservation):
             text = 'OBSERVATION:\n' + truncate_content(obs.content, max_message_chars)
             text += '\n[Last action has been rejected by the user]'
-            message = Message(role='user', content=[TextContent(text=text)])
+            message = Message(role='user', content=[TextContent(text=text)], source=obs)
         elif isinstance(obs, AgentCondensationObservation):
             text = truncate_content(obs.content, max_message_chars)
-            message = Message(role='user', content=[TextContent(text=text)])
+            message = Message(role='user', content=[TextContent(text=text)], source=obs)
         elif (
             isinstance(obs, RecallObservation)
             and self.agent_config.enable_prompt_extensions
@@ -472,7 +478,7 @@ class ConversationMemory:
 
                 # Return the combined message if we have any content
                 if message_content:
-                    message = Message(role='user', content=message_content)
+                    message = Message(role='user', content=message_content, source=obs)
                 else:
                     return []
             elif obs.recall_type == RecallType.KNOWLEDGE:
@@ -499,7 +505,9 @@ class ConversationMemory:
 
                         return [
                             Message(
-                                role='user', content=[TextContent(text=formatted_text)]
+                                role='user',
+                                content=[TextContent(text=formatted_text)],
+                                source=obs,
                             )
                         ]
 
@@ -524,6 +532,7 @@ class ConversationMemory:
                 content=message.content,
                 tool_call_id=tool_call_metadata.tool_call_id,
                 name=tool_call_metadata.function_name,
+                source=obs,
             )
             # No need to return the observation message
             # because it will be added by get_action_message when all the corresponding
