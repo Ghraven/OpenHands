@@ -1768,14 +1768,14 @@ urllib3 = ">=1.25.3,<3.0.0"
 
 [[package]]
 name = "daytona-sdk"
-version = "0.11.2"
+version = "0.11.3"
 description = "Python SDK for Daytona"
 optional = false
 python-versions = ">=3.7"
 groups = ["main"]
 files = [
-    {file = "daytona_sdk-0.11.2-py3-none-any.whl", hash = "sha256:f1adc46d2da04872236540b874d9ca1ce8ee5e9320b9241e339a6c53fdcdc0ce"},
-    {file = "daytona_sdk-0.11.2.tar.gz", hash = "sha256:c40c4d0efaa47948f896353cbedf5d34b0d32c4312798f0e5d0227bc0abe8ead"},
+    {file = "daytona_sdk-0.11.3-py3-none-any.whl", hash = "sha256:6a711d0610c98399afa481570e4409fd53e998b72c5f298707ac7e54d7afc7bb"},
+    {file = "daytona_sdk-0.11.3.tar.gz", hash = "sha256:74ed8a550a56b276da3b2e38b4d82f896a63364240cd93f024358aa16b8f72e2"},
 ]
 
 [package.dependencies]
@@ -6674,14 +6674,14 @@ testing = ["coverage (>=6.2)", "hypothesis (>=5.7.1)"]
 
 [[package]]
 name = "pytest-cov"
-version = "6.0.0"
+version = "6.1.0"
 description = "Pytest plugin for measuring coverage."
 optional = false
 python-versions = ">=3.9"
 groups = ["test"]
 files = [
-    {file = "pytest-cov-6.0.0.tar.gz", hash = "sha256:fde0b595ca248bb8e2d76f020b465f3b107c9632e6a1d1705f17834c89dcadc0"},
-    {file = "pytest_cov-6.0.0-py3-none-any.whl", hash = "sha256:eee6f1b9e61008bd34975a4d5bab25801eb31898b032dd55addc93e96fcaaa35"},
+    {file = "pytest_cov-6.1.0-py3-none-any.whl", hash = "sha256:cd7e1d54981d5185ef2b8d64b50172ce97e6f357e6df5cb103e828c7f993e201"},
+    {file = "pytest_cov-6.1.0.tar.gz", hash = "sha256:ec55e828c66755e5b74a21bd7cc03c303a9f928389c0563e50ba454a6dbe71db"},
 ]
 
 [package.dependencies]
@@ -9828,4 +9828,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "4b11652edfce8ce9dcf119300fd944ab51d91898b67fdc87a7294c61ec48b8e4"
+content-hash = "4cb5962bea24b52c4bd23079a757c769667ae61959010bb3e6991d9b0e0fbc60"
