@@ -44,10 +44,16 @@ export function useAutoTitle() {
       return;
     }
 
-    if (conversation.title && !defaultTitlePattern.test(conversation.title)) {
+    // Check if the conversation needs a title update or has a default title
+    const needsUpdate =
+      conversation.needs_title_update ||
+      (conversation.title && defaultTitlePattern.test(conversation.title));
+
+    if (!needsUpdate) {
       return;
     }
 
+    // Use the existing PATCH endpoint with an empty title to trigger auto-generation
     updateConversation(
       {
         id: conversationId,
@@ -59,11 +65,14 @@ export function useAutoTitle() {
             const updatedConversation =
               await OpenHands.getConversation(conversationId);
 
-            queryClient.setQueryData(
-              ["user", "conversation", conversationId],
-              updatedConversation,
-            );
+            if (updatedConversation) {
+              queryClient.setQueryData(
+                ["user", "conversation", conversationId],
+                updatedConversation,
+              );
+            }
           } catch (error) {
+            // Silently handle error and invalidate the query to refresh data
             queryClient.invalidateQueries({
               queryKey: ["user", "conversation", conversationId],
             });
